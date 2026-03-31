@@ -41,6 +41,26 @@ const { stringify } = require('csv-stringify/sync');
 const WP_BASE       = 'https://www.dmagazine.com/wp-json/wp/v2';
 const WP_FIELDS     = 'id,date,slug,title,excerpt,link,type,categories,tags,section';
 const WP_HEADERS    = { 'Content-Type': 'application/json', 'User-Agent': 'SEO DMAG Crawl' };
+
+// ─── taxonomy term lookup ────────────────────────────────────────────────────
+async function fetchTermMap(taxonomy) {
+  const url = `${WP_BASE}/${taxonomy}?per_page=100&_fields=id,name`;
+  return new Promise((resolve) => {
+    const req = require('https').get(url, { headers: WP_HEADERS }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const terms = JSON.parse(data);
+          const map = {};
+          if (Array.isArray(terms)) for (const t of terms) map[t.id] = t.name;
+          resolve(map);
+        } catch { resolve({}); }
+      });
+    });
+    req.on('error', () => resolve({}));
+  });
+}
 const AFTER         = '2026-02-28T23:59:59';
 const BEFORE        = '2026-04-01T00:00:00';
 const BATCH_SIZE    = 10;   // articles per Anthropic API call
@@ -111,6 +131,15 @@ async function wpFetchPage(after, before, pageNum) {
 
 async function fetchPosts(after, before) {
   console.log(`\n── Fetching posts ${after.slice(0, 10)} → ${before.slice(0, 10)} from WP API ──`);
+
+  // Resolve taxonomy IDs → names up front
+  console.log('  Fetching taxonomy maps...');
+  const [categoryMap, sectionMap] = await Promise.all([
+    fetchTermMap('categories'),
+    fetchTermMap('section'),
+  ]);
+  console.log(`  Categories: ${Object.keys(categoryMap).length}, Sections: ${Object.keys(sectionMap).length}`);
+
   const first = await wpFetchPage(after, before, 1);
   console.log(`  Total: ${first.totalPosts} posts across ${first.totalPages} pages`);
   let all = [...first.posts];
@@ -121,18 +150,26 @@ async function fetchPosts(after, before) {
     await sleep(DELAY_MS);
   }
   console.log(`\n  Retrieved: ${all.length} posts`);
-  return all.map(p => ({
-    id: p.id,
-    date: p.date,
-    slug: p.slug,
-    title: strip(p.title?.rendered ?? ''),
-    excerpt: strip(p.excerpt?.rendered ?? ''),
-    link: p.link,
-    type: p.type,
-    categories: (p.categories || []).join('|'),
-    tags: (p.tags || []).join('|'),
-    section: (p.section || []).join('|'),
-  }));
+  return all.map(p => {
+    const catIds = p.categories || [];
+    const secIds = p.section    || [];
+    return {
+      id:               p.id,
+      date:             p.date,
+      slug:             p.slug,
+      title:            strip(p.title?.rendered ?? ''),
+      excerpt:          strip(p.excerpt?.rendered ?? ''),
+      link:             p.link,
+      type:             p.type,
+      // human-readable names
+      section_name:     secIds.map(id => sectionMap[id] || id).join('|'),
+      category_names:   catIds.map(id => categoryMap[id] || id).join('|'),
+      // raw IDs preserved for reference
+      categories:       catIds.join('|'),
+      tags:             (p.tags || []).join('|'),
+      section:          secIds.join('|'),
+    };
+  });
 }
 
 // ─── classification ───────────────────────────────────────────────────────────
