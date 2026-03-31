@@ -38,7 +38,7 @@ const { parse } = require('csv-parse/sync');
 const { stringify } = require('csv-stringify/sync');
 
 // ─── config ──────────────────────────────────────────────────────────────────
-const WP_BASE       = 'https://dev.dmagazine.com/wp-json/wp/v2';
+const WP_BASE       = 'https://www.dmagazine.com/wp-json/wp/v2';
 const WP_FIELDS     = 'id,date,slug,title,excerpt,link,type,categories,tags,section';
 const WP_HEADERS    = { 'Content-Type': 'application/json', 'User-Agent': 'SEO DMAG Crawl' };
 const AFTER         = '2026-02-28T23:59:59';
