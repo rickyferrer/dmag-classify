@@ -217,6 +217,12 @@ export default function ArticleTable({ data, onReclassify }) {
               <th className="sortable col-title" onClick={() => handleSort('title')}>
                 Title<SortIcon col="title" />
               </th>
+              <th className="sortable col-section" onClick={() => handleSort('section_name')}>
+                Section<SortIcon col="section_name" />
+              </th>
+              <th className="sortable col-type" onClick={() => handleSort('type')}>
+                Type<SortIcon col="type" />
+              </th>
               <th className="sortable col-need" onClick={() => handleSort('user_need')}>
                 User Need<SortIcon col="user_need" />
               </th>
@@ -235,7 +241,7 @@ export default function ArticleTable({ data, onReclassify }) {
           <tbody>
             {paged.length === 0 ? (
               <tr>
-                <td colSpan={6 + gaColumns.length} style={{ textAlign: 'center', padding: '40px', color: '#718096' }}>
+                <td colSpan={8 + gaColumns.length} style={{ textAlign: 'center', padding: '40px', color: '#718096' }}>
                   No articles match the current filters.
                 </td>
               </tr>
@@ -246,6 +252,18 @@ export default function ArticleTable({ data, onReclassify }) {
                   <a href={post.link} target="_blank" rel="noopener noreferrer" title={post.title}>
                     {post.title}
                   </a>
+                </td>
+                <td className="col-section">
+                  {post.section_name
+                    ? post.section_name.split('|').filter(Boolean).map((s, i) => (
+                        <span key={i} className="section-badge">{s}</span>
+                      ))
+                    : <span className="muted-dash">—</span>}
+                </td>
+                <td className="col-type">
+                  {post.type
+                    ? <span className={`type-badge type-${post.type}`}>{post.type}</span>
+                    : '—'}
                 </td>
                 <td className="col-need">
                   {editingId === post.id ? (

@@ -326,6 +326,22 @@ body {
 }
 .btn-clear-filters:hover { background: #ffe5e5; }
 
+/* ─── Section / Type columns ─────────────────────────────────────────────── */
+.col-section   { min-width: 110px; }
+.col-type      { min-width: 80px; white-space: nowrap; }
+.section-badge { display: block; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.muted-dash    { color: var(--muted); }
+.type-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #edf2f7;
+  color: #4a5568;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
 .btn-icon.hide   { opacity: .25; }
 .btn-icon.hide:hover { opacity: 1; }
 .btn-icon.unhide { opacity: .6; color: var(--accent); }
