@@ -145,12 +145,19 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
     }
     const cleanCsv = lines.slice(startLine).join('\n');
 
+    // Auto-detect delimiter: GA4 exports can be tab- or comma-separated
+    const firstDataLine = cleanCsv.split(/\r?\n/).find(l => l.trim()) || '';
+    const tabCount   = (firstDataLine.match(/\t/g)  || []).length;
+    const commaCount = (firstDataLine.match(/,/g)   || []).length;
+    const delimiter  = tabCount > commaCount ? '\t' : ',';
+
     const analytics = parse(cleanCsv, {
       columns:             true,
       skip_empty_lines:    true,
       relax_column_count:  true,   // tolerate rows with extra/missing columns
       bom:                 true,
       trim:                true,
+      delimiter,
     });
 
     // Build lookup by URL slug (primary) and normalised title (fallback).
