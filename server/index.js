@@ -59,12 +59,14 @@ app.post('/api/run', (req, res) => {
     return res.status(409).json({ error: 'Pipeline is already running' });
   }
 
-  const { inputFile } = req.body || {};
+  const { inputFile, after, before } = req.body || {};
   pipelineState = { status: 'running', log: [], startedAt: new Date().toISOString(), finishedAt: null };
   broadcast({ type: 'start', status: 'running' });
 
   const args = [path.join(ROOT, 'dmag_classify.js')];
   if (inputFile) args.push('--input', inputFile);
+  if (after)     args.push('--after',  after);
+  if (before)    args.push('--before', before);
 
   const proc = spawn('node', args, { env: process.env, cwd: ROOT });
 

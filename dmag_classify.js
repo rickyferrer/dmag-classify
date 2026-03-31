@@ -46,6 +46,10 @@ const BEFORE        = '2026-04-01T00:00:00';
 const BATCH_SIZE    = 10;   // articles per Anthropic API call
 const DELAY_MS      = 300;  // polite delay between WP pages
 
+// Default date window (March 2026) — overridden by --after / --before CLI flags
+const DEFAULT_AFTER  = '2026-02-28T23:59:59';
+const DEFAULT_BEFORE = '2026-04-01T00:00:00';
+
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 if (!API_KEY) {
   console.error('ERROR: ANTHROPIC_API_KEY environment variable is not set.');
@@ -88,8 +92,8 @@ Respond ONLY with a JSON array, no markdown, no explanation. Each element:
 `.trim();
 
 // ─── WP fetch ────────────────────────────────────────────────────────────────
-async function wpFetchPage(pageNum) {
-  const url = `${WP_BASE}/posts?after=${AFTER}&before=${BEFORE}&per_page=100&page=${pageNum}&_fields=${WP_FIELDS}&status=publish`;
+async function wpFetchPage(after, before, pageNum) {
+  const url = `${WP_BASE}/posts?after=${after}&before=${before}&per_page=100&page=${pageNum}&_fields=${WP_FIELDS}&status=publish`;
   return new Promise((resolve, reject) => {
     const req = https.get(url, { headers: WP_HEADERS }, (res) => {
       let data = '';
@@ -105,14 +109,14 @@ async function wpFetchPage(pageNum) {
   });
 }
 
-async function fetchAllMarchPosts() {
-  console.log('\n── Fetching March 2026 posts from WP API ──');
-  const first = await wpFetchPage(1);
+async function fetchPosts(after, before) {
+  console.log(`\n── Fetching posts ${after.slice(0, 10)} → ${before.slice(0, 10)} from WP API ──`);
+  const first = await wpFetchPage(after, before, 1);
   console.log(`  Total: ${first.totalPosts} posts across ${first.totalPages} pages`);
   let all = [...first.posts];
   for (let p = 2; p <= first.totalPages; p++) {
     process.stdout.write(`  Page ${p}/${first.totalPages}...\r`);
-    const { posts } = await wpFetchPage(p);
+    const { posts } = await wpFetchPage(after, before, p);
     all = all.concat(posts);
     await sleep(DELAY_MS);
   }
@@ -265,8 +269,13 @@ function chunk(arr, size) {
 // ─── main ────────────────────────────────────────────────────────────────────
 (async () => {
   const args = process.argv.slice(2);
-  const inputFlag   = args.indexOf('--input');
-  const mergeFlag   = args.indexOf('--merge');
+  const inputFlag  = args.indexOf('--input');
+  const mergeFlag  = args.indexOf('--merge');
+  const afterFlag  = args.indexOf('--after');
+  const beforeFlag = args.indexOf('--before');
+
+  const after  = afterFlag  !== -1 ? args[afterFlag  + 1] : DEFAULT_AFTER;
+  const before = beforeFlag !== -1 ? args[beforeFlag + 1] : DEFAULT_BEFORE;
 
   let posts;
 
@@ -276,7 +285,7 @@ function chunk(arr, size) {
     console.log(`\nLoading posts from ${inputPath}...`);
     posts = JSON.parse(fs.readFileSync(inputPath, 'utf8'));
   } else {
-    posts = await fetchAllMarchPosts();
+    posts = await fetchPosts(after, before);
   }
 
   // classify

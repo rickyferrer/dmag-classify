@@ -1,8 +1,61 @@
 import { useState, useEffect, useRef } from 'react';
 
+const PRESET_LABELS = {
+  yesterday:  'Yesterday',
+  this_week:  'This week',
+  this_month: 'This month',
+  this_year:  'This year',
+  custom:     'Custom',
+};
+
+// Computes ISO datetime strings for the WP API after/before params.
+// The WP API treats `after` as exclusive (posts published AFTER this moment).
+function computeDateRange(preset, customAfter, customBefore) {
+  const d   = new Date();
+  const fmt = (dt) => dt.toISOString().slice(0, 19);
+
+  if (preset === 'yesterday') {
+    return {
+      after:  fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() - 2, 23, 59, 59)),
+      before: fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate(),     0,  0,  0)),
+    };
+  }
+  if (preset === 'this_week') {
+    // Week starts Monday (ISO standard)
+    const dayOfWeek = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
+    return {
+      after:  fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() - dayOfWeek - 1, 23, 59, 59)),
+      before: fmt(new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0)),
+    };
+  }
+  if (preset === 'this_month') {
+    return {
+      after:  fmt(new Date(d.getFullYear(), d.getMonth(),     0,  23, 59, 59)), // last day of prev month
+      before: fmt(new Date(d.getFullYear(), d.getMonth() + 1, 1,  0,  0,  0)), // 1st of next month
+    };
+  }
+  if (preset === 'this_year') {
+    return {
+      after:  fmt(new Date(d.getFullYear() - 1, 11, 31, 23, 59, 59)),
+      before: fmt(new Date(d.getFullYear() + 1,  0,  1,  0,  0,  0)),
+    };
+  }
+  if (preset === 'custom') {
+    return {
+      after:  customAfter  ? `${customAfter}T00:00:00`  : '',
+      before: customBefore ? `${customBefore}T23:59:59` : '',
+    };
+  }
+  return { after: '', before: '' };
+}
+
 export default function RunPanel({ status, logLines }) {
-  const [uploadMsg,   setUploadMsg]   = useState(null);
-  const [uploading,   setUploading]   = useState(false);
+  const [datePreset,   setDatePreset]   = useState('this_month');
+  const [customAfter,  setCustomAfter]  = useState('');
+  const [customBefore, setCustomBefore] = useState('');
+  const [runMsg,       setRunMsg]       = useState(null);
+  const [uploadMsg,    setUploadMsg]    = useState(null);
+  const [uploading,    setUploading]    = useState(false);
   const logRef = useRef(null);
 
   // Auto-scroll log to bottom when new lines arrive
@@ -13,10 +66,16 @@ export default function RunPanel({ status, logLines }) {
   }, [logLines]);
 
   const handleRun = async () => {
+    if (datePreset === 'custom' && (!customAfter || !customBefore)) {
+      setRunMsg({ ok: false, text: 'Select both a start and end date' });
+      return;
+    }
+    setRunMsg(null);
+    const { after, before } = computeDateRange(datePreset, customAfter, customBefore);
     await fetch('/api/run', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({}),
+      body:    JSON.stringify({ after, before }),
     });
   };
 
@@ -51,30 +110,59 @@ export default function RunPanel({ status, logLines }) {
         <div className="control-card">
           <h3>Classification Pipeline</h3>
           <p className="control-desc">
-            Fetches March 2026 posts from the WordPress API, then classifies each article
-            by User Need using Claude (batches of 10 via the Anthropic API). Progress
-            streams live in the log panel.
+            Fetches posts from the WordPress API for the selected date range, then classifies
+            each article by User Need using Claude (batches of 10). Progress streams live in
+            the log panel.
           </p>
+
+          {/* Date range presets */}
+          <div className="date-range-row">
+            {Object.keys(PRESET_LABELS).map(p => (
+              <button
+                key={p}
+                className={`preset-btn ${datePreset === p ? 'active' : ''}`}
+                onClick={() => setDatePreset(p)}
+                disabled={isRunning}
+              >
+                {PRESET_LABELS[p]}
+              </button>
+            ))}
+          </div>
+
+          {datePreset === 'custom' && (
+            <div className="custom-dates">
+              <input
+                type="date"
+                value={customAfter}
+                onChange={e => setCustomAfter(e.target.value)}
+                disabled={isRunning}
+              />
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>to</span>
+              <input
+                type="date"
+                value={customBefore}
+                onChange={e => setCustomBefore(e.target.value)}
+                disabled={isRunning}
+              />
+            </div>
+          )}
+
           <div className="control-footer">
-            <button
-              className="btn btn-primary"
-              onClick={handleRun}
-              disabled={isRunning}
-            >
+            <button className="btn btn-primary" onClick={handleRun} disabled={isRunning}>
               {isRunning ? '⏳ Running…' : '▶ Run Classification'}
             </button>
-            {status === 'done'  && <span className="badge badge-success">Completed</span>}
-            {status === 'error' && <span className="badge badge-error">Error — see log</span>}
+            {status === 'done'  && !runMsg && <span className="badge badge-success">Completed</span>}
+            {status === 'error' && !runMsg && <span className="badge badge-error">Error — see log</span>}
+            {runMsg && <span className={`badge ${runMsg.ok ? 'badge-success' : 'badge-error'}`}>{runMsg.text}</span>}
           </div>
         </div>
 
         <div className="control-card">
           <h3>Upload Analytics CSV</h3>
           <p className="control-desc">
-            Upload a GA4 export containing a <code>page_path</code> (or <code>slug</code>)
-            column plus metrics like <code>pageviews</code> and <code>avg_session_duration</code>.
-            Analytics columns are added to existing classified data without re-running
-            classification. Run classification first.
+            Upload a GA4 export (page title dimension with Views, Active users, etc.).
+            Analytics are merged into existing classified data without re-running classification.
+            Run classification first.
           </p>
           <div className="control-footer">
             <label className={`btn btn-secondary ${uploading ? 'disabled' : ''}`} style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
@@ -101,9 +189,7 @@ export default function RunPanel({ status, logLines }) {
             Download the full classified dataset (with any analytics columns) as a CSV.
           </p>
           <div className="control-footer">
-            <a className="btn btn-secondary" href="/api/export" download>
-              ⬇ Export CSV
-            </a>
+            <a className="btn btn-secondary" href="/api/export" download>⬇ Export CSV</a>
           </div>
         </div>
       </div>
