@@ -161,9 +161,13 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
 
     for (const row of analytics) {
       // slug-based key from any URL-like column
-      const urlVal = row.slug || row.page_path || row.url || row['Page path'] || row['Page'] || '';
+      const urlVal = row.slug || row.page_path || row.url
+        || row['Page path'] || row['Page path and screen class']
+        || row['Full page URL'] || row['Page'] || '';
       if (urlVal) {
-        const key = urlVal.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
+        // Strip protocol + domain from full URLs before extracting slug
+        const urlPath = urlVal.replace(/^https?:\/\/[^/]+/, '');
+        const key = urlPath.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
         if (key) bySlug[key] = row;
       }
       // title-based key — strip trailing " - D Magazine" / " - D CEO Magazine"

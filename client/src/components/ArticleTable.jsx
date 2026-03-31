@@ -70,6 +70,20 @@ export default function ArticleTable({ data, onReclassify }) {
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [page,     setPage]     = useState(1);
+  const [hiddenIds,  setHiddenIds]  = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('dmag_hidden_ids') || '[]')); }
+    catch { return new Set(); }
+  });
+  const [showHidden, setShowHidden] = useState(false);
+
+  const toggleHide = (id) => {
+    setHiddenIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      localStorage.setItem('dmag_hidden_ids', JSON.stringify([...next]));
+      return next;
+    });
+  };
 
   // Derive which GA columns exist in the dataset
   const gaColumns = useMemo(() => {
@@ -98,6 +112,7 @@ export default function ArticleTable({ data, onReclassify }) {
 
   const filtered = useMemo(() => {
     let d = data;
+    if (!showHidden) d = d.filter(p => !hiddenIds.has(p.id));
     if (filterNeed  !== 'all') d = d.filter(p => p.user_need === filterNeed);
     if (filterConf  !== 'all') d = d.filter(p => p.confidence === filterConf);
     if (filterMulti === 'multi')  d = d.filter(p => p.secondary_needs && p.secondary_needs.length > 0);
@@ -111,12 +126,16 @@ export default function ArticleTable({ data, onReclassify }) {
     }
     return [...d].sort((a, b) => {
       let va = a[sortKey] ?? '', vb = b[sortKey] ?? '';
-      if (sortKey === 'date') { va = new Date(va); vb = new Date(vb); }
-      else if (typeof va === 'string') { va = va.toLowerCase(); vb = vb.toLowerCase(); }
-      else { va = parseFloat(va) || 0; vb = parseFloat(vb) || 0; }
+      if (sortKey === 'date') {
+        va = new Date(va); vb = new Date(vb);
+      } else if (sortKey.startsWith('ga_') || (!isNaN(parseFloat(va)) && !isNaN(parseFloat(vb)))) {
+        va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+      } else {
+        va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+      }
       return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
     });
-  }, [data, filterNeed, filterConf, search, sortKey, sortDir]);
+  }, [data, filterNeed, filterConf, filterMulti, search, sortKey, sortDir, hiddenIds, showHidden]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -177,6 +196,11 @@ export default function ArticleTable({ data, onReclassify }) {
         </select>
 
         <span className="result-count">{filtered.length} articles</span>
+        {(hiddenIds.size > 0 || showHidden) && (
+          <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={() => setShowHidden(s => !s)}>
+            {showHidden ? 'Hide hidden' : `Hidden (${hiddenIds.size})`}
+          </button>
+        )}
         <a className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }} href="/api/export" download>
           ⬇ Export CSV
         </a>
@@ -216,7 +240,7 @@ export default function ArticleTable({ data, onReclassify }) {
                 </td>
               </tr>
             ) : paged.map(post => (
-              <tr key={post.id} className={post.manually_corrected ? 'corrected' : ''}>
+              <tr key={post.id} className={[post.manually_corrected ? 'corrected' : '', hiddenIds.has(post.id) ? 'hidden-row' : ''].filter(Boolean).join(' ')}>
                 <td className="col-date">{post.date?.slice(0, 10)}</td>
                 <td className="col-title">
                   <a href={post.link} target="_blank" rel="noopener noreferrer" title={post.title}>
@@ -264,7 +288,16 @@ export default function ArticleTable({ data, onReclassify }) {
                       <button className="btn-icon cancel" onClick={cancelEdit}             title="Cancel">✕</button>
                     </>
                   ) : (
-                    <button className="btn-icon edit" onClick={() => startEdit(post)} title="Re-classify">✏</button>
+                    <>
+                      <button className="btn-icon edit" onClick={() => startEdit(post)} title="Re-classify">✏</button>
+                      <button
+                        className={`btn-icon ${hiddenIds.has(post.id) ? 'unhide' : 'hide'}`}
+                        onClick={() => toggleHide(post.id)}
+                        title={hiddenIds.has(post.id) ? 'Unhide' : 'Hide row'}
+                      >
+                        {hiddenIds.has(post.id) ? '👁' : '🙈'}
+                      </button>
+                    </>
                   )}
                 </td>
               </tr>

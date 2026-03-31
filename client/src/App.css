@@ -292,6 +292,10 @@ body {
 .btn-icon.cancel { color: var(--danger); }
 .btn-icon.edit   { opacity: .4; }
 .btn-icon.edit:hover { opacity: 1; }
+.btn-icon.hide   { opacity: .25; }
+.btn-icon.hide:hover { opacity: 1; }
+.btn-icon.unhide { opacity: .6; color: var(--accent); }
+tr.hidden-row td { opacity: .35; background: #f7fafc !important; }
 
 .need-select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
 
