@@ -151,30 +151,48 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
       trim:                true,
     });
 
-    // Build slug → row lookup (handles GA4 page_path format)
-    const bySlug = {};
+    // Build lookup by URL slug (primary) and normalised title (fallback).
+    // Handles GA4 page_path format and title-only exports (Search Console, etc.)
+    const bySlug  = {};
+    const byTitle = {};
+    const SITE_SUFFIXES = /\s*[-|–]\s*D\s*(CEO\s*)?Magazine\s*$/i;
+
     for (const row of analytics) {
-      const key = (row.slug || row.page_path || row.url || '')
-        .replace(/^\/|\/$/g, '')
-        .split('/')
-        .pop();
-      if (key) bySlug[key] = row;
+      // slug-based key from any URL-like column
+      const urlVal = row.slug || row.page_path || row.url || row['Page path'] || row['Page'] || '';
+      if (urlVal) {
+        const key = urlVal.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
+        if (key) bySlug[key] = row;
+      }
+      // title-based key — strip trailing " - D Magazine" / " - D CEO Magazine"
+      const titleVal = row.title || row['Page title'] || row['Page Title'] ||
+                       row['Landing page'] || Object.values(row)[0] || '';
+      if (titleVal) {
+        const key = titleVal.replace(SITE_SUFFIXES, '').trim().toLowerCase();
+        if (key) byTitle[key] = row;
+      }
     }
 
     let matched = 0;
+    let matchedBySlug = 0, matchedByTitle = 0;
     for (const post of posts) {
-      const slugKey = post.slug.replace(/^\/|\/$/g, '').split('/').pop();
-      const row = bySlug[slugKey] || bySlug[post.slug];
+      const slugKey  = post.slug.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
+      const titleKey = (post.title || '').trim().toLowerCase();
+      const row = bySlug[slugKey] || bySlug[post.slug.toLowerCase()] || byTitle[titleKey];
       if (row) {
         matched++;
+        if (bySlug[slugKey] || bySlug[post.slug.toLowerCase()]) matchedBySlug++;
+        else matchedByTitle++;
         for (const [k, v] of Object.entries(row)) post[`ga_${k}`] = v;
       }
     }
 
+    const matchDetail = `(${matchedBySlug} by URL, ${matchedByTitle} by title)`;
+
     fs.writeFileSync(DATA_FILE, JSON.stringify(posts, null, 2));
     fs.unlinkSync(req.file.path);
 
-    const msg = `Analytics merged: ${matched}/${posts.length} articles matched`;
+    const msg = `Analytics merged: ${matched}/${posts.length} articles matched ${matchDetail}`;
     logLine(msg);
     broadcast({ type: 'analytics_merged', matched, total: posts.length });
 
