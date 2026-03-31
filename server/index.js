@@ -124,8 +124,32 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
 
   try {
     const posts    = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    const csvText  = fs.readFileSync(req.file.path, 'utf8');
-    const analytics = parse(csvText, { columns: true, skip_empty_lines: true });
+    let csvText = fs.readFileSync(req.file.path, 'utf8');
+
+    // Strip UTF-8 BOM if present (common in Excel/GA4 exports)
+    if (csvText.charCodeAt(0) === 0xFEFF) csvText = csvText.slice(1);
+
+    // GA4 exports often prepend metadata lines (e.g. "# Jan 1 – Mar 31, 2026")
+    // before the real header row. Skip any leading lines that don't look like
+    // a header (i.e. lines where every field starts with # or the line has
+    // far fewer commas than the data rows).
+    const lines = csvText.split(/\r?\n/);
+    let startLine = 0;
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed || trimmed.startsWith('#')) { startLine = i + 1; continue; }
+      // If the first non-empty, non-comment line looks like a real header, stop
+      break;
+    }
+    const cleanCsv = lines.slice(startLine).join('\n');
+
+    const analytics = parse(cleanCsv, {
+      columns:             true,
+      skip_empty_lines:    true,
+      relax_column_count:  true,   // tolerate rows with extra/missing columns
+      bom:                 true,
+      trim:                true,
+    });
 
     // Build slug → row lookup (handles GA4 page_path format)
     const bySlug = {};
