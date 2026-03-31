@@ -166,6 +166,7 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
       }
       // title-based key — strip trailing " - D Magazine" / " - D CEO Magazine"
       const titleVal = row.title || row['Page title'] || row['Page Title'] ||
+                       row['Page title and screen name'] ||
                        row['Landing page'] || Object.values(row)[0] || '';
       if (titleVal) {
         const key = titleVal.replace(SITE_SUFFIXES, '').trim().toLowerCase();

@@ -7,7 +7,7 @@ import { USER_NEED_COLORS, USER_NEED_LABELS } from '../constants';
 // Detect whichever numeric pageviews/sessions column is present in the data
 function extractPageviews(post) {
   const candidates = [
-    'ga_pageviews', 'ga_sessions', 'ga_screenPageViews',
+    'ga_Views', 'ga_pageviews', 'ga_sessions', 'ga_screenPageViews',
     'ga_screen_page_views', 'ga_views', 'ga_total_pageviews',
   ];
   for (const k of candidates) {

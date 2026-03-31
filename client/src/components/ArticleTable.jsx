@@ -8,21 +8,31 @@ const CORE_COLS = ['date', 'title', 'user_need', 'confidence', 'un_reason'];
 
 // GA columns we know how to format nicely
 const GA_DISPLAY = {
-  ga_pageviews:             'Pageviews',
-  ga_sessions:              'Sessions',
-  ga_screenPageViews:       'Page Views',
-  ga_screen_page_views:     'Page Views',
-  ga_avg_session_duration:  'Avg Time',
-  ga_averageSessionDuration:'Avg Time',
-  ga_bounce_rate:           'Bounce %',
-  ga_bounceRate:            'Bounce %',
+  // GA4 export (page title dimensions)
+  'ga_Views':                                    'Views',
+  'ga_Active users':                             'Active Users',
+  'ga_Total users':                              'Total Users',
+  'ga_Views per active user':                    'Views/User',
+  'ga_Average engagement time per active user':  'Avg Engagement',
+  'ga_Event count':                              'Events',
+  'ga_Key events':                               'Key Events',
+  'ga_Total revenue':                            'Revenue',
+  // generic GA4 / UA column names
+  ga_pageviews:              'Pageviews',
+  ga_sessions:               'Sessions',
+  ga_screenPageViews:        'Page Views',
+  ga_screen_page_views:      'Page Views',
+  ga_avg_session_duration:   'Avg Time',
+  ga_averageSessionDuration: 'Avg Time',
+  ga_bounce_rate:            'Bounce %',
+  ga_bounceRate:             'Bounce %',
 };
 
 function formatGa(col, val) {
   if (!val && val !== 0) return '–';
   const n = parseFloat(val);
   if (isNaN(n)) return val;
-  if (col.toLowerCase().includes('duration')) {
+  if (col.toLowerCase().includes('duration') || col.toLowerCase().includes('engagement time')) {
     const mins = Math.floor(n / 60);
     const secs = Math.round(n % 60);
     return `${mins}:${String(secs).padStart(2, '0')}`;
