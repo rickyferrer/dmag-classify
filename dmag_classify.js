@@ -55,7 +55,7 @@ if (!API_KEY) {
 // ─── user needs definitions (passed to the model as context) ─────────────────
 const USER_NEEDS_CONTEXT = `
 You are classifying news articles using the User Needs Model 2.0 developed by Dmitry Shishkin.
-Assign EXACTLY ONE primary user need from this list to each article, based on its title and excerpt.
+Assign ONE primary user need and up to 2 secondary user needs per article, based on its title and excerpt.
 
 USER NEEDS:
 1. update_me        — Breaking news, what happened, factual updates, announcements, results
@@ -78,8 +78,13 @@ CLASSIFICATION RULES:
 - "Leading Off" daily news digests → update_me
 - Obituaries → inspire_me (unless pure announcement → update_me)
 
+SECONDARY NEEDS — only assign if the article GENUINELY serves a second audience intent,
+not just because a topic is tangentially mentioned. An article mixing a news announcement
+with deep background context warrants update_me + educate_me. A pure breaking news story
+warrants no secondary need. Limit to 2 secondary needs maximum; use [] if none apply.
+
 Respond ONLY with a JSON array, no markdown, no explanation. Each element:
-{ "id": <post_id>, "user_need": "<need_slug>", "confidence": "high|medium|low", "reason": "<10 words max>" }
+{ "id": <post_id>, "user_need": "<need_slug>", "secondary_needs": ["<need_slug>"], "confidence": "high|medium|low", "reason": "<10 words max>" }
 `.trim();
 
 // ─── WP fetch ────────────────────────────────────────────────────────────────
@@ -145,7 +150,7 @@ async function classifyBatch(articles) {
     },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
+      max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -278,9 +283,10 @@ function chunk(arr, size) {
   const classifications = await classifyAll(posts);
   for (const post of posts) {
     const c = classifications[post.id] || {};
-    post.user_need  = c.user_need  ?? 'unclassified';
-    post.confidence = c.confidence ?? 'low';
-    post.un_reason  = c.reason     ?? '';
+    post.user_need       = c.user_need       ?? 'unclassified';
+    post.secondary_needs = (c.secondary_needs || []).join('|');
+    post.confidence      = c.confidence      ?? 'low';
+    post.un_reason       = c.reason          ?? '';
   }
 
   // optional analytics merge

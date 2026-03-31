@@ -72,6 +72,7 @@ export default function App() {
   const articleCount     = results.length;
   const classifiedCount  = results.filter(p => p.user_need && p.user_need !== 'unclassified').length;
   const highConfCount    = results.filter(p => p.confidence === 'high').length;
+  const multiNeedCount   = results.filter(p => p.secondary_needs && p.secondary_needs.length > 0).length;
   const analyticsCount   = hasAnalytics
     ? results.filter(p => Object.keys(p).some(k => k.startsWith('ga_'))).length
     : null;
@@ -80,7 +81,7 @@ export default function App() {
     <div className="app">
       <header className="app-header">
         <div className="header-brand">
-          <span className="header-logo">D/</span>
+          <img src="/d-logo.svg" alt="D Magazine" className="header-logo-img" />
           <span className="header-title">User Needs Classifier</span>
         </div>
         <nav className="header-nav">
@@ -118,10 +119,10 @@ export default function App() {
             ) : (
               <>
                 <div className="stats-row">
-                  <StatCard label="Total Articles"   value={articleCount} />
-                  <StatCard label="Classified"        value={classifiedCount} sub={`${((classifiedCount / articleCount) * 100).toFixed(0)}%`} />
-                  <StatCard label="High Confidence"   value={highConfCount} />
-                  <StatCard label="With Analytics"    value={analyticsCount ?? '—'} />
+                  <StatCard label="Total Articles"    value={articleCount} />
+                  <StatCard label="Classified"         value={classifiedCount} sub={`${((classifiedCount / articleCount) * 100).toFixed(0)}%`} />
+                  <StatCard label="Multi-need"         value={multiNeedCount} sub={multiNeedCount ? `${((multiNeedCount / articleCount) * 100).toFixed(0)}%` : null} title="Articles serving more than one user need — candidates for splitting" />
+                  <StatCard label="With Analytics"     value={analyticsCount ?? '—'} />
                 </div>
 
                 <div className="chart-grid">
@@ -170,9 +171,9 @@ export default function App() {
   );
 }
 
-function StatCard({ label, value, sub }) {
+function StatCard({ label, value, sub, title }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card" title={title}>
       <div className="stat-value">{value}{sub && <span className="stat-sub">{sub}</span>}</div>
       <div className="stat-label">{label}</div>
     </div>

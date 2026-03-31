@@ -43,9 +43,9 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
 }
 
-.header-brand { display: flex; align-items: center; gap: 8px; }
-.header-logo  { font-size: 22px; font-weight: 900; color: #63b3ed; letter-spacing: -1px; }
-.header-title { font-size: 15px; font-weight: 600; opacity: .9; }
+.header-brand    { display: flex; align-items: center; gap: 10px; }
+.header-logo-img { width: 32px; height: 32px; border-radius: 3px; display: block; }
+.header-title    { font-size: 15px; font-weight: 600; opacity: .9; }
 
 .header-nav { display: flex; gap: 2px; }
 .nav-tab {
@@ -267,10 +267,13 @@ body {
 .col-ga     { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .col-actions{ white-space: nowrap; }
 
+.need-cell { display: flex; flex-direction: column; gap: 3px; }
+.secondary-needs { display: flex; flex-wrap: wrap; gap: 3px; }
+
 .need-badge {
   display: inline-block; padding: 2px 9px;
   border-radius: 12px; font-size: 11px; font-weight: 500;
-  border: 1px solid currentColor;
+  border: 1px solid currentColor; white-space: nowrap;
 }
 .conf-badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 500; }
 .conf-high   { background: #c6f6d5; color: #276749; }

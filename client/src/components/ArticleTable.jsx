@@ -28,6 +28,25 @@ const GA_DISPLAY = {
   ga_bounceRate:             'Bounce %',
 };
 
+function NeedBadge({ need, secondary }) {
+  const color = USER_NEED_COLORS[need] || '#9c9c9c';
+  return (
+    <span
+      className="need-badge"
+      style={{
+        background:  color + (secondary ? '11' : '1a'),
+        color,
+        borderColor: color,
+        opacity:     secondary ? 0.75 : 1,
+        fontSize:    secondary ? 10 : undefined,
+        padding:     secondary ? '1px 6px' : undefined,
+      }}
+    >
+      {USER_NEED_LABELS[need] || need}
+    </span>
+  );
+}
+
 function formatGa(col, val) {
   if (!val && val !== 0) return '–';
   const n = parseFloat(val);
@@ -44,8 +63,9 @@ function formatGa(col, val) {
 export default function ArticleTable({ data, onReclassify }) {
   const [sortKey,  setSortKey]  = useState('date');
   const [sortDir,  setSortDir]  = useState('desc');
-  const [filterNeed, setFilterNeed] = useState('all');
-  const [filterConf, setFilterConf] = useState('all');
+  const [filterNeed,  setFilterNeed]  = useState('all');
+  const [filterConf,  setFilterConf]  = useState('all');
+  const [filterMulti, setFilterMulti] = useState('all');
   const [search,   setSearch]   = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
@@ -78,8 +98,10 @@ export default function ArticleTable({ data, onReclassify }) {
 
   const filtered = useMemo(() => {
     let d = data;
-    if (filterNeed !== 'all') d = d.filter(p => p.user_need === filterNeed);
-    if (filterConf !== 'all') d = d.filter(p => p.confidence === filterConf);
+    if (filterNeed  !== 'all') d = d.filter(p => p.user_need === filterNeed);
+    if (filterConf  !== 'all') d = d.filter(p => p.confidence === filterConf);
+    if (filterMulti === 'multi')  d = d.filter(p => p.secondary_needs && p.secondary_needs.length > 0);
+    if (filterMulti === 'single') d = d.filter(p => !p.secondary_needs || p.secondary_needs.length === 0);
     if (search) {
       const s = search.toLowerCase();
       d = d.filter(p =>
@@ -144,6 +166,15 @@ export default function ArticleTable({ data, onReclassify }) {
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
+        <select
+          className="filter-select"
+          value={filterMulti}
+          onChange={e => { setFilterMulti(e.target.value); setPage(1); }}
+        >
+          <option value="all">All articles</option>
+          <option value="multi">Multi-need only</option>
+          <option value="single">Single-need only</option>
+        </select>
 
         <span className="result-count">{filtered.length} articles</span>
         <a className="btn btn-secondary" style={{ padding: '6px 12px', fontSize: 12 }} href="/api/export" download>
@@ -205,16 +236,16 @@ export default function ArticleTable({ data, onReclassify }) {
                       ))}
                     </select>
                   ) : (
-                    <span
-                      className="need-badge"
-                      style={{
-                        background:   (USER_NEED_COLORS[post.user_need] || '#9c9c9c') + '1a',
-                        color:         USER_NEED_COLORS[post.user_need] || '#718096',
-                        borderColor:   USER_NEED_COLORS[post.user_need] || '#9c9c9c',
-                      }}
-                    >
-                      {USER_NEED_LABELS[post.user_need] || post.user_need || '—'}
-                    </span>
+                    <div className="need-cell">
+                      <NeedBadge need={post.user_need} />
+                      {post.secondary_needs && post.secondary_needs.length > 0 && (
+                        <div className="secondary-needs">
+                          {post.secondary_needs.split('|').filter(Boolean).map(n => (
+                            <NeedBadge key={n} need={n} secondary />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </td>
                 <td className="col-conf">
