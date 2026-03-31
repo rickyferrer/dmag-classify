@@ -292,6 +292,40 @@ body {
 .btn-icon.cancel { color: var(--danger); }
 .btn-icon.edit   { opacity: .4; }
 .btn-icon.edit:hover { opacity: 1; }
+/* ─── Global filter bar ──────────────────────────────────────────────────── */
+.global-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.global-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.global-filter-count {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.btn-clear-filters {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff3f3;
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn-clear-filters:hover { background: #ffe5e5; }
+
 .btn-icon.hide   { opacity: .25; }
 .btn-icon.hide:hover { opacity: 1; }
 .btn-icon.unhide { opacity: .6; color: var(--accent); }

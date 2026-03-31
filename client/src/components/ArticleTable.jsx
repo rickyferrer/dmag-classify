@@ -63,12 +63,10 @@ function formatGa(col, val) {
 export default function ArticleTable({ data, onReclassify }) {
   const [sortKey,  setSortKey]  = useState('date');
   const [sortDir,  setSortDir]  = useState('desc');
-  const [filterNeed,    setFilterNeed]    = useState('all');
-  const [filterConf,    setFilterConf]    = useState('all');
-  const [filterMulti,   setFilterMulti]   = useState('all');
-  const [filterSection, setFilterSection] = useState('all');
-  const [filterType,    setFilterType]    = useState('all');
-  const [search,   setSearch]   = useState('');
+  const [filterNeed,  setFilterNeed]  = useState('all');
+  const [filterConf,  setFilterConf]  = useState('all');
+  const [filterMulti, setFilterMulti] = useState('all');
+  const [search,      setSearch]      = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [page,     setPage]     = useState(1);
@@ -86,21 +84,6 @@ export default function ArticleTable({ data, onReclassify }) {
       return next;
     });
   };
-
-  // Derive unique sections and post types from the dataset
-  const sections = useMemo(() => {
-    const set = new Set();
-    for (const p of data) {
-      if (p.section_name) p.section_name.split('|').filter(Boolean).forEach(s => set.add(s));
-    }
-    return [...set].sort();
-  }, [data]);
-
-  const postTypes = useMemo(() => {
-    const set = new Set();
-    for (const p of data) if (p.type) set.add(p.type);
-    return [...set].sort();
-  }, [data]);
 
   // Derive which GA columns exist in the dataset
   const gaColumns = useMemo(() => {
@@ -130,10 +113,8 @@ export default function ArticleTable({ data, onReclassify }) {
   const filtered = useMemo(() => {
     let d = data;
     if (!showHidden) d = d.filter(p => !hiddenIds.has(p.id));
-    if (filterNeed    !== 'all') d = d.filter(p => p.user_need === filterNeed);
-    if (filterConf    !== 'all') d = d.filter(p => p.confidence === filterConf);
-    if (filterSection !== 'all') d = d.filter(p => p.section_name && p.section_name.split('|').includes(filterSection));
-    if (filterType    !== 'all') d = d.filter(p => p.type === filterType);
+    if (filterNeed  !== 'all') d = d.filter(p => p.user_need === filterNeed);
+    if (filterConf  !== 'all') d = d.filter(p => p.confidence === filterConf);
     if (filterMulti === 'multi')  d = d.filter(p => p.secondary_needs && p.secondary_needs.length > 0);
     if (filterMulti === 'single') d = d.filter(p => !p.secondary_needs || p.secondary_needs.length === 0);
     if (search) {
@@ -154,7 +135,7 @@ export default function ArticleTable({ data, onReclassify }) {
       }
       return sortDir === 'asc' ? (va > vb ? 1 : -1) : (va < vb ? 1 : -1);
     });
-  }, [data, filterNeed, filterConf, filterSection, filterType, filterMulti, search, sortKey, sortDir, hiddenIds, showHidden]);
+  }, [data, filterNeed, filterConf, filterMulti, search, sortKey, sortDir, hiddenIds, showHidden]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -204,26 +185,6 @@ export default function ArticleTable({ data, onReclassify }) {
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        {sections.length > 0 && (
-          <select
-            className="filter-select"
-            value={filterSection}
-            onChange={e => { setFilterSection(e.target.value); setPage(1); }}
-          >
-            <option value="all">All sections</option>
-            {sections.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        )}
-        {postTypes.length > 1 && (
-          <select
-            className="filter-select"
-            value={filterType}
-            onChange={e => { setFilterType(e.target.value); setPage(1); }}
-          >
-            <option value="all">All types</option>
-            {postTypes.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
         <select
           className="filter-select"
           value={filterMulti}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import NeedsBarChart from './components/NeedsBarChart';
 import ScatterPlot   from './components/ScatterPlot';
 import ArticleTable  from './components/ArticleTable';
@@ -10,6 +10,8 @@ export default function App() {
   const [pipelineStatus, setPipelineStatus] = useState('idle');
   const [logLines,       setLogLines]       = useState([]);
   const [hasAnalytics,   setHasAnalytics]   = useState(false);
+  const [filterSection,  setFilterSection]  = useState('all');
+  const [filterType,     setFilterType]     = useState('all');
 
   const loadResults = useCallback(async () => {
     try {
@@ -69,12 +71,34 @@ export default function App() {
     }
   };
 
-  const articleCount     = results.length;
-  const classifiedCount  = results.filter(p => p.user_need && p.user_need !== 'unclassified').length;
-  const highConfCount    = results.filter(p => p.confidence === 'high').length;
-  const multiNeedCount   = results.filter(p => p.secondary_needs && p.secondary_needs.length > 0).length;
-  const analyticsCount   = hasAnalytics
-    ? results.filter(p => Object.keys(p).some(k => k.startsWith('ga_'))).length
+  // Derive filter options from the full results
+  const sections = useMemo(() => {
+    const set = new Set();
+    for (const p of results) {
+      if (p.section_name) p.section_name.split('|').filter(Boolean).forEach(s => set.add(s));
+    }
+    return [...set].sort();
+  }, [results]);
+
+  const postTypes = useMemo(() => {
+    const set = new Set();
+    for (const p of results) if (p.type) set.add(p.type);
+    return [...set].sort();
+  }, [results]);
+
+  // Apply global filters
+  const filteredResults = useMemo(() => {
+    let d = results;
+    if (filterSection !== 'all') d = d.filter(p => p.section_name && p.section_name.split('|').includes(filterSection));
+    if (filterType    !== 'all') d = d.filter(p => p.type === filterType);
+    return d;
+  }, [results, filterSection, filterType]);
+
+  const articleCount    = filteredResults.length;
+  const classifiedCount = filteredResults.filter(p => p.user_need && p.user_need !== 'unclassified').length;
+  const multiNeedCount  = filteredResults.filter(p => p.secondary_needs && p.secondary_needs.length > 0).length;
+  const analyticsCount  = hasAnalytics
+    ? filteredResults.filter(p => Object.keys(p).some(k => k.startsWith('ga_'))).length
     : null;
 
   return (
@@ -104,6 +128,46 @@ export default function App() {
         </nav>
       </header>
 
+      {/* ── Global filter bar ── */}
+      {results.length > 0 && (sections.length > 0 || postTypes.length > 1) && (
+        <div className="global-filter-bar">
+          <span className="global-filter-label">Filter:</span>
+          {sections.length > 0 && (
+            <select
+              className="filter-select"
+              value={filterSection}
+              onChange={e => setFilterSection(e.target.value)}
+            >
+              <option value="all">All sections</option>
+              {sections.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
+          {postTypes.length > 1 && (
+            <select
+              className="filter-select"
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
+            >
+              <option value="all">All types</option>
+              {postTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+          {(filterSection !== 'all' || filterType !== 'all') && (
+            <button
+              className="btn-clear-filters"
+              onClick={() => { setFilterSection('all'); setFilterType('all'); }}
+            >
+              Clear
+            </button>
+          )}
+          <span className="global-filter-count">
+            {filteredResults.length === results.length
+              ? `${results.length} articles`
+              : `${filteredResults.length} of ${results.length} articles`}
+          </span>
+        </div>
+      )}
+
       <main className="app-main">
         {/* ── Dashboard ── */}
         {tab === 'dashboard' && (
@@ -128,8 +192,8 @@ export default function App() {
                 <div className="chart-grid">
                   <section className="chart-card">
                     <h2>User Needs Distribution</h2>
-                    <p className="chart-sub">Articles published by need category (March 2026)</p>
-                    <NeedsBarChart data={results} />
+                    <p className="chart-sub">Articles published by need category</p>
+                    <NeedsBarChart data={filteredResults} />
                   </section>
 
                   <section className="chart-card">
@@ -139,7 +203,7 @@ export default function App() {
                       (Shishkin insight — bottom-right = wasted effort)
                     </p>
                     {hasAnalytics ? (
-                      <ScatterPlot data={results} />
+                      <ScatterPlot data={filteredResults} />
                     ) : (
                       <div className="no-data-placeholder">
                         <span>📥</span>
@@ -156,7 +220,7 @@ export default function App() {
         {/* ── Articles table ── */}
         {tab === 'articles' && (
           <ArticleTable
-            data={results}
+            data={filteredResults}
             hasAnalytics={hasAnalytics}
             onReclassify={handleReclassify}
           />
