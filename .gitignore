@@ -1,0 +1,8 @@
+node_modules/
+client/node_modules/
+client/dist/
+uploads/
+dmag_march_classified.json
+dmag_march_classified.csv
+.env
+*.log
