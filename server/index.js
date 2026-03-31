@@ -160,24 +160,23 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
       delimiter,
     });
 
-    // Build lookup by URL slug (primary) and normalised title (fallback).
-    // Handles GA4 page_path format and title-only exports (Search Console, etc.)
-    const bySlug  = {};
+    // Build lookup tables.
+    // Primary:  full path (e.g. "business-economy/2026/03/topgolf-callaway-what-went-wrong")
+    //           — eliminates false matches caused by slug collisions across sections/years
+    // Fallback: title normalisation for exports that have no URL column
+    const byPath  = {};
     const byTitle = {};
     const SITE_SUFFIXES = /\s*[-|–]\s*D\s*(CEO\s*)?Magazine\s*$/i;
 
     for (const row of analytics) {
-      // slug-based key from any URL-like column
       const urlVal = row.slug || row.page_path || row.url
         || row['Page path'] || row['Page path and screen class']
         || row['Full page URL'] || row['Page'] || '';
       if (urlVal) {
-        // Strip protocol + domain from full URLs before extracting slug
-        const urlPath = urlVal.replace(/^https?:\/\/[^/]+/, '');
-        const key = urlPath.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
-        if (key) bySlug[key] = row;
+        const urlPath = urlVal.replace(/^https?:\/\/[^/]+/, '');  // strip domain
+        const pathKey = urlPath.replace(/^\/|\/$/g, '').toLowerCase();
+        if (pathKey) byPath[pathKey] = row;
       }
-      // title-based key — strip trailing " - D Magazine" / " - D CEO Magazine"
       const titleVal = row.title || row['Page title'] || row['Page Title'] ||
                        row['Page title and screen name'] ||
                        row['Landing page'] || Object.values(row)[0] || '';
@@ -188,20 +187,22 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
     }
 
     let matched = 0;
-    let matchedBySlug = 0, matchedByTitle = 0;
+    let matchedByPath = 0, matchedByTitle = 0;
     for (const post of posts) {
-      const slugKey  = post.slug.replace(/^\/|\/$/g, '').split('/').pop().toLowerCase();
+      // Extract full path from the WP post's canonical link, e.g.
+      // "https://www.dmagazine.com/business-economy/2026/03/topgolf-..." → "business-economy/2026/03/topgolf-..."
+      const postPath = (post.link || '').replace(/^https?:\/\/[^/]+/, '').replace(/^\/|\/$/g, '').toLowerCase();
       const titleKey = (post.title || '').trim().toLowerCase();
-      const row = bySlug[slugKey] || bySlug[post.slug.toLowerCase()] || byTitle[titleKey];
+      const row = (postPath && byPath[postPath]) || byTitle[titleKey];
       if (row) {
         matched++;
-        if (bySlug[slugKey] || bySlug[post.slug.toLowerCase()]) matchedBySlug++;
+        if (postPath && byPath[postPath]) matchedByPath++;
         else matchedByTitle++;
         for (const [k, v] of Object.entries(row)) post[`ga_${k}`] = v;
       }
     }
 
-    const matchDetail = `(${matchedBySlug} by URL, ${matchedByTitle} by title)`;
+    const matchDetail = `(${matchedByPath} by path, ${matchedByTitle} by title)`;
 
     fs.writeFileSync(DATA_FILE, JSON.stringify(posts, null, 2));
     fs.unlinkSync(req.file.path);
