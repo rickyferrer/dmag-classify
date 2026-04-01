@@ -6,3 +6,4 @@ dmag_march_classified.json
 dmag_march_classified.csv
 .env
 *.log
+dmag_classified.db

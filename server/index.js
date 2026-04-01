@@ -8,14 +8,26 @@ const path     = require('path');
 const { parse }    = require('csv-parse/sync');
 const { stringify } = require('csv-stringify/sync');
 const cors     = require('cors');
+const db       = require('./db');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 const ROOT = path.join(__dirname, '..');
-const DATA_FILE  = path.join(ROOT, 'dmag_march_classified.json');
-const UPLOADS    = path.join(ROOT, 'uploads');
+const UPLOADS = path.join(ROOT, 'uploads');
 
 fs.mkdirSync(UPLOADS, { recursive: true });
+
+// ─── Auto-import legacy JSON on first run ─────────────────────────────────────
+const JSON_LEGACY = path.join(ROOT, 'dmag_march_classified.json');
+if (db.count() === 0 && fs.existsSync(JSON_LEGACY)) {
+  try {
+    const legacy = JSON.parse(fs.readFileSync(JSON_LEGACY, 'utf8'));
+    db.upsertMany(legacy);
+    console.log(`Imported ${legacy.length} posts from legacy JSON into SQLite`);
+  } catch (e) {
+    console.warn('Legacy JSON import failed:', e.message);
+  }
+}
 
 app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:3001'] }));
 app.use(express.json());
@@ -45,15 +57,12 @@ app.get('/api/status', (req, res) => {
     'Connection':    'keep-alive',
   });
   res.flushHeaders();
-  // Send current snapshot immediately so the UI syncs on connect/reconnect
   res.write(`data: ${JSON.stringify({ type: 'snapshot', ...pipelineState })}\n\n`);
   sseSubs.add(res);
   req.on('close', () => sseSubs.delete(res));
 });
 
 // ─── Run classification pipeline ──────────────────────────────────────────────
-// The classify script already batches Anthropic calls in groups of 10; we just
-// stream its stdout back to the SSE subscribers — no need to re-implement batching.
 app.post('/api/run', (req, res) => {
   if (pipelineState.status === 'running') {
     return res.status(409).json({ error: 'Pipeline is already running' });
@@ -64,9 +73,16 @@ app.post('/api/run', (req, res) => {
   broadcast({ type: 'start', status: 'running' });
 
   const args = [path.join(ROOT, 'dmag_classify.js')];
-  if (inputFile) args.push('--input', inputFile);
+  if (inputFile) args.push('--input',  inputFile);
   if (after)     args.push('--after',  after);
   if (before)    args.push('--before', before);
+
+  // Write skip-list so already-classified posts don't burn Claude API credits
+  const existingIds  = db.getClassifiedIds();
+  const skipFile     = path.join(UPLOADS, `skip_${Date.now()}.json`);
+  fs.writeFileSync(skipFile, JSON.stringify(existingIds));
+  args.push('--existing', skipFile);
+  logLine(`Skipping ${existingIds.length} already-classified posts`);
 
   const proc = spawn('node', args, { env: process.env, cwd: ROOT });
 
@@ -77,6 +93,21 @@ app.post('/api/run', (req, res) => {
   proc.stderr.on('data', onData('[err] '));
 
   proc.on('close', (code) => {
+    // Clean up skip file
+    try { fs.unlinkSync(skipFile); } catch {}
+
+    // Import the JSON output into SQLite
+    const jsonOut = path.join(ROOT, 'dmag_march_classified.json');
+    if (code === 0 && fs.existsSync(jsonOut)) {
+      try {
+        const posts = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
+        db.upsertMany(posts);
+        logLine(`Saved ${posts.length} articles to database`);
+      } catch (e) {
+        logLine(`[warn] DB import failed: ${e.message}`);
+      }
+    }
+
     pipelineState.status    = code === 0 ? 'done' : 'error';
     pipelineState.finishedAt = new Date().toISOString();
     broadcast({ type: 'done', status: pipelineState.status, exitCode: code });
@@ -87,83 +118,68 @@ app.post('/api/run', (req, res) => {
 
 // ─── Results ──────────────────────────────────────────────────────────────────
 app.get('/api/results', (req, res) => {
-  if (!fs.existsSync(DATA_FILE)) return res.json([]);
   try {
-    res.json(JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')));
-  } catch {
-    res.status(500).json({ error: 'Failed to read results file' });
+    res.json(db.getAll());
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to read results' });
   }
 });
 
 // ─── Manual re-classify ───────────────────────────────────────────────────────
 app.patch('/api/results/:id', (req, res) => {
-  if (!fs.existsSync(DATA_FILE)) return res.status(404).json({ error: 'No results file' });
   try {
-    const posts = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    const id    = parseInt(req.params.id, 10);
-    const post  = posts.find(p => p.id === id);
+    const id   = parseInt(req.params.id, 10);
+    const post = db.updateOne(id, { ...req.body, manually_corrected: true });
     if (!post) return res.status(404).json({ error: 'Post not found' });
-    Object.assign(post, req.body, { manually_corrected: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify(posts, null, 2));
     res.json(post);
-  } catch {
+  } catch (e) {
     res.status(500).json({ error: 'Update failed' });
   }
 });
 
-// ─── Upload analytics CSV + merge (no re-classification) ─────────────────────
-// Merge is done directly in the server to preserve existing classifications
-// and any manual corrections the user has applied.
+// ─── Upload analytics CSV + merge ────────────────────────────────────────────
 const upload = multer({ dest: UPLOADS });
 
 app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-
-  if (!fs.existsSync(DATA_FILE)) {
+  if (db.count() === 0) {
     fs.unlinkSync(req.file.path);
     return res.status(400).json({ error: 'Run classification first before uploading analytics' });
   }
 
   try {
-    const posts    = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    let csvText = fs.readFileSync(req.file.path, 'utf8');
+    const posts   = db.getAll();
+    let csvText   = fs.readFileSync(req.file.path, 'utf8');
 
-    // Strip UTF-8 BOM if present (common in Excel/GA4 exports)
+    // Strip UTF-8 BOM
     if (csvText.charCodeAt(0) === 0xFEFF) csvText = csvText.slice(1);
 
-    // GA4 exports often prepend metadata lines (e.g. "# Jan 1 – Mar 31, 2026")
-    // before the real header row. Skip any leading lines that don't look like
-    // a header (i.e. lines where every field starts with # or the line has
-    // far fewer commas than the data rows).
+    // Skip GA4 metadata lines before the real header
     const lines = csvText.split(/\r?\n/);
     let startLine = 0;
     for (let i = 0; i < Math.min(lines.length, 10); i++) {
       const trimmed = lines[i].trim();
       if (!trimmed || trimmed.startsWith('#')) { startLine = i + 1; continue; }
-      // If the first non-empty, non-comment line looks like a real header, stop
       break;
     }
     const cleanCsv = lines.slice(startLine).join('\n');
 
-    // Auto-detect delimiter: GA4 exports can be tab- or comma-separated
+    // Auto-detect delimiter (tab vs comma)
     const firstDataLine = cleanCsv.split(/\r?\n/).find(l => l.trim()) || '';
     const tabCount   = (firstDataLine.match(/\t/g)  || []).length;
     const commaCount = (firstDataLine.match(/,/g)   || []).length;
     const delimiter  = tabCount > commaCount ? '\t' : ',';
 
     const analytics = parse(cleanCsv, {
-      columns:             true,
-      skip_empty_lines:    true,
-      relax_column_count:  true,   // tolerate rows with extra/missing columns
-      bom:                 true,
-      trim:                true,
+      columns:            true,
+      skip_empty_lines:   true,
+      relax_column_count: true,
+      bom:                true,
+      trim:               true,
       delimiter,
     });
 
-    // Build lookup tables.
-    // Primary:  full path (e.g. "business-economy/2026/03/topgolf-callaway-what-went-wrong")
-    //           — eliminates false matches caused by slug collisions across sections/years
-    // Fallback: title normalisation for exports that have no URL column
+    // Build lookup: full path → analytics row
     const byPath  = {};
     const byTitle = {};
     const SITE_SUFFIXES = /\s*[-|–]\s*D\s*(CEO\s*)?Magazine\s*$/i;
@@ -173,7 +189,7 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
         || row['Page path'] || row['Page path and screen class']
         || row['Full page URL'] || row['Page'] || '';
       if (urlVal) {
-        const urlPath = urlVal.replace(/^https?:\/\/[^/]+/, '');  // strip domain
+        const urlPath = urlVal.replace(/^https?:\/\/[^/]+/, '');
         const pathKey = urlPath.replace(/^\/|\/$/g, '').toLowerCase();
         if (pathKey) byPath[pathKey] = row;
       }
@@ -186,11 +202,10 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
       }
     }
 
-    let matched = 0;
-    let matchedByPath = 0, matchedByTitle = 0;
+    let matched = 0, matchedByPath = 0, matchedByTitle = 0;
+    const dbMatches = [];
+
     for (const post of posts) {
-      // Extract full path from the WP post's canonical link, e.g.
-      // "https://www.dmagazine.com/business-economy/2026/03/topgolf-..." → "business-economy/2026/03/topgolf-..."
       const postPath = (post.link || '').replace(/^https?:\/\/[^/]+/, '').replace(/^\/|\/$/g, '').toLowerCase();
       const titleKey = (post.title || '').trim().toLowerCase();
       const row = (postPath && byPath[postPath]) || byTitle[titleKey];
@@ -198,15 +213,17 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
         matched++;
         if (postPath && byPath[postPath]) matchedByPath++;
         else matchedByTitle++;
-        for (const [k, v] of Object.entries(row)) post[`ga_${k}`] = v;
+        // Collect raw GA columns (no ga_ prefix) for storage
+        const analytics = {};
+        for (const [k, v] of Object.entries(row)) analytics[k] = v;
+        dbMatches.push({ id: post.id, analytics });
       }
     }
 
-    const matchDetail = `(${matchedByPath} by path, ${matchedByTitle} by title)`;
-
-    fs.writeFileSync(DATA_FILE, JSON.stringify(posts, null, 2));
+    db.updateAnalytics(dbMatches);
     fs.unlinkSync(req.file.path);
 
+    const matchDetail = `(${matchedByPath} by path, ${matchedByTitle} by title)`;
     const msg = `Analytics merged: ${matched}/${posts.length} articles matched ${matchDetail}`;
     logLine(msg);
     broadcast({ type: 'analytics_merged', matched, total: posts.length });
@@ -220,15 +237,14 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
 
 // ─── Export CSV ───────────────────────────────────────────────────────────────
 app.get('/api/export', (req, res) => {
-  if (!fs.existsSync(DATA_FILE)) return res.status(404).json({ error: 'No results file' });
   try {
-    const posts = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    const posts = db.getAll();
     res.set({
       'Content-Type':        'text/csv',
       'Content-Disposition': 'attachment; filename="dmag_classified.csv"',
     });
     res.send(stringify(posts, { header: true }));
-  } catch {
+  } catch (e) {
     res.status(500).json({ error: 'Export failed' });
   }
 });

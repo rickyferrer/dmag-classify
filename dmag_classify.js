@@ -209,10 +209,13 @@ async function classifyBatch(articles) {
   return JSON.parse(clean);
 }
 
-async function classifyAll(posts) {
-  console.log('\n── Classifying with Claude ──');
+async function classifyAll(posts, existingIds = new Set()) {
+  const toClassify = posts.filter(p => !existingIds.has(p.id));
+  const toSkip     = posts.filter(p =>  existingIds.has(p.id));
+
+  console.log(`\n── Classifying with Claude (${toClassify.length} new, ${toSkip.length} skipped) ──`);
   const results = {};
-  const batches = chunk(posts, BATCH_SIZE);
+  const batches = chunk(toClassify, BATCH_SIZE);
 
   for (let i = 0; i < batches.length; i++) {
     process.stdout.write(`  Batch ${i + 1}/${batches.length} (${batches[i].length} articles)...\r`);
@@ -306,13 +309,24 @@ function chunk(arr, size) {
 // ─── main ────────────────────────────────────────────────────────────────────
 (async () => {
   const args = process.argv.slice(2);
-  const inputFlag  = args.indexOf('--input');
-  const mergeFlag  = args.indexOf('--merge');
-  const afterFlag  = args.indexOf('--after');
-  const beforeFlag = args.indexOf('--before');
+  const inputFlag    = args.indexOf('--input');
+  const mergeFlag    = args.indexOf('--merge');
+  const afterFlag    = args.indexOf('--after');
+  const beforeFlag   = args.indexOf('--before');
+  const existingFlag = args.indexOf('--existing');
 
   const after  = afterFlag  !== -1 ? args[afterFlag  + 1] : DEFAULT_AFTER;
   const before = beforeFlag !== -1 ? args[beforeFlag + 1] : DEFAULT_BEFORE;
+
+  // Load skip-list of already-classified post IDs (passed by server)
+  let existingIds = new Set();
+  if (existingFlag !== -1) {
+    const existingPath = args[existingFlag + 1];
+    if (existingPath && fs.existsSync(existingPath)) {
+      const ids = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
+      existingIds = new Set(ids);
+    }
+  }
 
   let posts;
 
@@ -325,8 +339,8 @@ function chunk(arr, size) {
     posts = await fetchPosts(after, before);
   }
 
-  // classify
-  const classifications = await classifyAll(posts);
+  // classify (skips posts already in DB)
+  const classifications = await classifyAll(posts, existingIds);
   for (const post of posts) {
     const c = classifications[post.id] || {};
     post.user_need       = c.user_need       ?? 'unclassified';
