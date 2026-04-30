@@ -7,3 +7,5 @@ dmag_march_classified.csv
 .env
 *.log
 dmag_classified.db
+dmag_classified.db-shm
+dmag_classified.db-wal
