@@ -8,7 +8,13 @@ const DB_PATH = process.env.DB_PATH
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 
-db.exec(`CREATE TABLE IF NOT EXISTS articles (
+db.exec(`
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS articles (
   id                INTEGER PRIMARY KEY,
   date              TEXT,
   slug              TEXT,
@@ -118,5 +124,18 @@ module.exports = {
 
   count() {
     return db.prepare('SELECT COUNT(*) as n FROM articles').get().n;
+  },
+
+  getLatestPostDate() {
+    return db.prepare('SELECT MAX(date) AS d FROM articles').get()?.d ?? null;
+  },
+
+  getAnalyticsRefreshedAt() {
+    return db.prepare("SELECT value FROM meta WHERE key='analytics_refreshed_at'").get()?.value ?? null;
+  },
+
+  setAnalyticsRefreshedAt(ts) {
+    db.prepare(`INSERT INTO meta (key,value) VALUES ('analytics_refreshed_at',@ts)
+      ON CONFLICT(key) DO UPDATE SET value=excluded.value`).run({ ts });
   },
 };

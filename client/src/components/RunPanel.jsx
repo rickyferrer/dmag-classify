@@ -49,13 +49,15 @@ function computeDateRange(preset, customAfter, customBefore) {
   return { after: '', before: '' };
 }
 
-export default function RunPanel({ status, logLines }) {
+export default function RunPanel({ status, logLines, ga4Configured, analyticsRefreshedAt }) {
   const [datePreset,   setDatePreset]   = useState('this_month');
   const [customAfter,  setCustomAfter]  = useState('');
   const [customBefore, setCustomBefore] = useState('');
   const [runMsg,       setRunMsg]       = useState(null);
   const [uploadMsg,    setUploadMsg]    = useState(null);
   const [uploading,    setUploading]    = useState(false);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [refreshMsg,   setRefreshMsg]   = useState(null);
   const logRef = useRef(null);
 
   // Auto-scroll log to bottom when new lines arrive
@@ -98,6 +100,23 @@ export default function RunPanel({ status, logLines }) {
     } finally {
       setUploading(false);
       e.target.value = '';
+    }
+  };
+
+  const handleRefreshAnalytics = async () => {
+    setRefreshing(true);
+    setRefreshMsg(null);
+    try {
+      const r    = await fetch('/api/refresh-analytics', { method: 'POST' });
+      const data = await r.json();
+      setRefreshMsg(r.ok
+        ? { ok: true,  text: `Merged: ${data.matched} of ${data.total} articles matched` }
+        : { ok: false, text: data.error || 'Refresh failed' }
+      );
+    } catch {
+      setRefreshMsg({ ok: false, text: 'Network error' });
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -156,6 +175,31 @@ export default function RunPanel({ status, logLines }) {
             {runMsg && <span className={`badge ${runMsg.ok ? 'badge-success' : 'badge-error'}`}>{runMsg.text}</span>}
           </div>
         </div>
+
+        {ga4Configured && (
+          <div className="control-card">
+            <h3>Analytics — GA4 API</h3>
+            <p className="control-desc">
+              Pull the latest pageview and engagement metrics directly from the GA4 Data API.
+              Covers the last 90 days, matched by page path. Refreshes automatically every day at 6 AM.
+            </p>
+            {analyticsRefreshedAt && (
+              <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>
+                Last refreshed: {new Date(analyticsRefreshedAt).toLocaleString()}
+              </p>
+            )}
+            <div className="control-footer">
+              <button className="btn btn-secondary" onClick={handleRefreshAnalytics} disabled={refreshing}>
+                {refreshing ? 'Refreshing…' : '↻ Refresh Analytics'}
+              </button>
+              {refreshMsg && (
+                <span className={`badge ${refreshMsg.ok ? 'badge-success' : 'badge-error'}`}>
+                  {refreshMsg.text}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="control-card">
           <h3>Upload Analytics CSV</h3>

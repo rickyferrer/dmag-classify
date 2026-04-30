@@ -9,9 +9,11 @@ export default function App() {
   const [results,        setResults]        = useState([]);
   const [pipelineStatus, setPipelineStatus] = useState('idle');
   const [logLines,       setLogLines]       = useState([]);
-  const [hasAnalytics,   setHasAnalytics]   = useState(false);
-  const [filterSection,  setFilterSection]  = useState('all');
-  const [filterType,     setFilterType]     = useState('all');
+  const [hasAnalytics,        setHasAnalytics]        = useState(false);
+  const [filterSection,       setFilterSection]       = useState('all');
+  const [filterType,          setFilterType]          = useState('all');
+  const [ga4Configured,       setGa4Configured]       = useState(false);
+  const [analyticsRefreshedAt,setAnalyticsRefreshedAt]= useState(null);
 
   const loadResults = useCallback(async () => {
     try {
@@ -25,6 +27,10 @@ export default function App() {
   // SSE — subscribe once on mount, reconnect automatically on close
   useEffect(() => {
     loadResults();
+    fetch('/api/analytics-status')
+      .then(r => r.json())
+      .then(d => { setGa4Configured(d.configured); setAnalyticsRefreshedAt(d.refreshedAt); })
+      .catch(() => {});
     let es;
     let retryTimer;
 
@@ -40,12 +46,13 @@ export default function App() {
           setLogLines(prev => [...prev, msg.line]);
         } else if (msg.type === 'start') {
           setPipelineStatus('running');
-          setLogLines([]);
+          if (msg.trigger === 'auto') setLogLines([]);
         } else if (msg.type === 'done') {
           setPipelineStatus(msg.status);
           loadResults();
         } else if (msg.type === 'analytics_merged') {
           loadResults();
+          if (msg.refreshedAt) setAnalyticsRefreshedAt(msg.refreshedAt);
         }
       };
 
@@ -228,7 +235,12 @@ export default function App() {
 
         {/* ── Run pipeline ── */}
         {tab === 'run' && (
-          <RunPanel status={pipelineStatus} logLines={logLines} />
+          <RunPanel
+            status={pipelineStatus}
+            logLines={logLines}
+            ga4Configured={ga4Configured}
+            analyticsRefreshedAt={analyticsRefreshedAt}
+          />
         )}
       </main>
     </div>

@@ -1,14 +1,16 @@
 'use strict';
 
-const express  = require('express');
+const express   = require('express');
 const { spawn } = require('child_process');
-const multer   = require('multer');
-const fs       = require('fs');
-const path     = require('path');
-const { parse }    = require('csv-parse/sync');
+const multer    = require('multer');
+const fs        = require('fs');
+const path      = require('path');
+const { parse }     = require('csv-parse/sync');
 const { stringify } = require('csv-stringify/sync');
-const cors     = require('cors');
-const db       = require('./db');
+const cors      = require('cors');
+const schedule  = require('node-schedule');
+const db        = require('./db');
+const { refreshAnalytics, isConfigured } = require('./analytics');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -49,6 +51,55 @@ function logLine(line) {
   broadcast({ type: 'log', line });
 }
 
+// ─── Classification pipeline helper ───────────────────────────────────────────
+// Shared by the HTTP handler and the scheduler to avoid duplication.
+// trigger: 'manual' | 'auto'
+function runPipeline(after, before, trigger = 'manual') {
+  if (pipelineState.status === 'running') {
+    console.log(`[pipeline] Already running — skipping ${trigger} trigger`);
+    return;
+  }
+
+  pipelineState = { status: 'running', log: [], startedAt: new Date().toISOString(), finishedAt: null };
+  broadcast({ type: 'start', status: 'running', trigger });
+
+  const args = [path.join(ROOT, 'dmag_classify.js')];
+  if (after)  args.push('--after',  after);
+  if (before) args.push('--before', before);
+
+  const existingIds = db.getClassifiedIds();
+  const skipFile    = path.join(UPLOADS, `skip_${Date.now()}.json`);
+  fs.writeFileSync(skipFile, JSON.stringify(existingIds));
+  args.push('--existing', skipFile);
+  logLine(`[${trigger}] Skipping ${existingIds.length} already-classified posts`);
+
+  const proc   = spawn('node', args, { env: process.env, cwd: ROOT });
+  const onData = (prefix) => (chunk) =>
+    chunk.toString().split('\n').forEach(l => { if (l.trim()) logLine(prefix + l); });
+
+  proc.stdout.on('data', onData(''));
+  proc.stderr.on('data', onData('[err] '));
+
+  proc.on('close', (code) => {
+    try { fs.unlinkSync(skipFile); } catch {}
+
+    const jsonOut = path.join(ROOT, 'dmag_march_classified.json');
+    if (code === 0 && fs.existsSync(jsonOut)) {
+      try {
+        const posts = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
+        db.upsertMany(posts);
+        logLine(`Saved ${posts.length} articles to database`);
+      } catch (e) {
+        logLine(`[warn] DB import failed: ${e.message}`);
+      }
+    }
+
+    pipelineState.status     = code === 0 ? 'done' : 'error';
+    pipelineState.finishedAt = new Date().toISOString();
+    broadcast({ type: 'done', status: pipelineState.status, exitCode: code, trigger });
+  });
+}
+
 // ─── SSE — live pipeline progress ─────────────────────────────────────────────
 app.get('/api/status', (req, res) => {
   res.set({
@@ -62,57 +113,13 @@ app.get('/api/status', (req, res) => {
   req.on('close', () => sseSubs.delete(res));
 });
 
-// ─── Run classification pipeline ──────────────────────────────────────────────
+// ─── Run classification pipeline (manual) ─────────────────────────────────────
 app.post('/api/run', (req, res) => {
   if (pipelineState.status === 'running') {
     return res.status(409).json({ error: 'Pipeline is already running' });
   }
-
-  const { inputFile, after, before } = req.body || {};
-  pipelineState = { status: 'running', log: [], startedAt: new Date().toISOString(), finishedAt: null };
-  broadcast({ type: 'start', status: 'running' });
-
-  const args = [path.join(ROOT, 'dmag_classify.js')];
-  if (inputFile) args.push('--input',  inputFile);
-  if (after)     args.push('--after',  after);
-  if (before)    args.push('--before', before);
-
-  // Write skip-list so already-classified posts don't burn Claude API credits
-  const existingIds  = db.getClassifiedIds();
-  const skipFile     = path.join(UPLOADS, `skip_${Date.now()}.json`);
-  fs.writeFileSync(skipFile, JSON.stringify(existingIds));
-  args.push('--existing', skipFile);
-  logLine(`Skipping ${existingIds.length} already-classified posts`);
-
-  const proc = spawn('node', args, { env: process.env, cwd: ROOT });
-
-  const onData = (prefix) => (chunk) =>
-    chunk.toString().split('\n').forEach(l => { if (l.trim()) logLine(prefix + l); });
-
-  proc.stdout.on('data', onData(''));
-  proc.stderr.on('data', onData('[err] '));
-
-  proc.on('close', (code) => {
-    // Clean up skip file
-    try { fs.unlinkSync(skipFile); } catch {}
-
-    // Import the JSON output into SQLite
-    const jsonOut = path.join(ROOT, 'dmag_march_classified.json');
-    if (code === 0 && fs.existsSync(jsonOut)) {
-      try {
-        const posts = JSON.parse(fs.readFileSync(jsonOut, 'utf8'));
-        db.upsertMany(posts);
-        logLine(`Saved ${posts.length} articles to database`);
-      } catch (e) {
-        logLine(`[warn] DB import failed: ${e.message}`);
-      }
-    }
-
-    pipelineState.status    = code === 0 ? 'done' : 'error';
-    pipelineState.finishedAt = new Date().toISOString();
-    broadcast({ type: 'done', status: pipelineState.status, exitCode: code });
-  });
-
+  const { after, before } = req.body || {};
+  runPipeline(after, before, 'manual');
   res.json({ ok: true });
 });
 
@@ -137,7 +144,7 @@ app.patch('/api/results/:id', (req, res) => {
   }
 });
 
-// ─── Upload analytics CSV + merge ────────────────────────────────────────────
+// ─── Upload analytics CSV + merge ─────────────────────────────────────────────
 const upload = multer({ dest: UPLOADS });
 
 app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
@@ -151,10 +158,8 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
     const posts   = db.getAll();
     let csvText   = fs.readFileSync(req.file.path, 'utf8');
 
-    // Strip UTF-8 BOM
     if (csvText.charCodeAt(0) === 0xFEFF) csvText = csvText.slice(1);
 
-    // Skip GA4 metadata lines before the real header
     const lines = csvText.split(/\r?\n/);
     let startLine = 0;
     for (let i = 0; i < Math.min(lines.length, 10); i++) {
@@ -164,7 +169,6 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
     }
     const cleanCsv = lines.slice(startLine).join('\n');
 
-    // Auto-detect delimiter (tab vs comma)
     const firstDataLine = cleanCsv.split(/\r?\n/).find(l => l.trim()) || '';
     const tabCount   = (firstDataLine.match(/\t/g)  || []).length;
     const commaCount = (firstDataLine.match(/,/g)   || []).length;
@@ -179,7 +183,6 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
       delimiter,
     });
 
-    // Build lookup: full path → analytics row
     const byPath  = {};
     const byTitle = {};
     const SITE_SUFFIXES = /\s*[-|–]\s*D\s*(CEO\s*)?Magazine\s*$/i;
@@ -213,10 +216,9 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
         matched++;
         if (postPath && byPath[postPath]) matchedByPath++;
         else matchedByTitle++;
-        // Collect raw GA columns (no ga_ prefix) for storage
-        const analytics = {};
-        for (const [k, v] of Object.entries(row)) analytics[k] = v;
-        dbMatches.push({ id: post.id, analytics });
+        const analyticsObj = {};
+        for (const [k, v] of Object.entries(row)) analyticsObj[k] = v;
+        dbMatches.push({ id: post.id, analytics: analyticsObj });
       }
     }
 
@@ -231,6 +233,32 @@ app.post('/api/upload-analytics', upload.single('analytics'), (req, res) => {
     res.json({ ok: true, matched, total: posts.length });
   } catch (e) {
     try { fs.unlinkSync(req.file.path); } catch {}
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── GA4 API analytics refresh ────────────────────────────────────────────────
+app.get('/api/analytics-status', (req, res) => {
+  res.json({
+    configured:  isConfigured(),
+    refreshedAt: db.getAnalyticsRefreshedAt(),
+  });
+});
+
+app.post('/api/refresh-analytics', async (req, res) => {
+  if (!isConfigured()) {
+    return res.status(503).json({
+      error: 'GA4 API not configured. Set GA4_PROPERTY_ID and GOOGLE_APPLICATION_CREDENTIALS_JSON.',
+    });
+  }
+  try {
+    const result = await refreshAnalytics();
+    if (result.skipped) return res.json({ ok: true, skipped: true });
+    logLine(`GA4 analytics refreshed: ${result.matched}/${result.total} articles matched`);
+    broadcast({ type: 'analytics_merged', matched: result.matched, total: result.total, source: 'ga4_api', refreshedAt: result.refreshedAt });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    console.error('[analytics] Refresh error:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -257,4 +285,37 @@ app.get('*', (req, res) => {
     : res.status(404).send('Frontend not built. Run: npm run build');
 });
 
-app.listen(PORT, () => console.log(`Server → http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server → http://localhost:${PORT}`);
+
+  // ── Auto-classify: every 30 minutes ────────────────────────────────────────
+  // Checks for WP posts newer than the latest date in the DB. Only genuinely
+  // new articles hit the Claude API (existing IDs are on the skip list).
+  schedule.scheduleJob('*/30 * * * *', () => {
+    const latestDate = db.getLatestPostDate();
+    if (!latestDate) {
+      console.log('[auto-classify] DB is empty — skipping');
+      return;
+    }
+    const after  = latestDate;
+    const before = new Date().toISOString().slice(0, 19);
+    console.log(`[auto-classify] Checking for posts after ${after}`);
+    runPipeline(after, before, 'auto');
+  });
+
+  // ── GA4 daily analytics refresh ────────────────────────────────────────────
+  const GA4_HOUR = parseInt(process.env.GA4_REFRESH_HOUR || '6', 10);
+  schedule.scheduleJob(`0 ${GA4_HOUR} * * *`, async () => {
+    if (!isConfigured()) return;
+    try {
+      console.log('[ga4-scheduler] Running daily analytics refresh');
+      const result = await refreshAnalytics();
+      if (!result.skipped) {
+        console.log(`[ga4-scheduler] Done — ${result.matched}/${result.total} matched`);
+        broadcast({ type: 'analytics_merged', matched: result.matched, total: result.total, source: 'ga4_api', refreshedAt: result.refreshedAt });
+      }
+    } catch (e) {
+      console.error('[ga4-scheduler] Error:', e.message);
+    }
+  });
+});

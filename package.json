@@ -9,13 +9,15 @@
     "install:all": "npm install && cd client && npm install"
   },
   "dependencies": {
+    "@google-analytics/data": "^5.2.1",
     "better-sqlite3": "^12.8.0",
     "cors": "^2.8.5",
     "csv-parse": "^5.5.6",
     "csv-stringify": "^6.4.6",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
-    "node-fetch": "^3.3.2"
+    "node-fetch": "^3.3.2",
+    "node-schedule": "^2.1.1"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
